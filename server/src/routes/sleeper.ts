@@ -87,6 +87,11 @@ router.get("/league/:leagueId/start-sit", async (req, res) => {
     const roster = rosters.find((r) => Number(r.roster_id) === rosterId);
     if (!roster) return res.status(404).json({ error: `Roster ${rosterId} not found` });
 
+    const currentStartersIds: string[] = Array.isArray(roster.starters)
+        ? roster.starters.filter(Boolean).map(String)
+        : [];
+
+
     // Current roster players (IDs)
     const rosterPlayerIds: string[] = Array.isArray(roster.players) ? roster.players.filter(Boolean) : [];
 
@@ -125,6 +130,38 @@ router.get("/league/:leagueId/start-sit", async (req, res) => {
       baselinePointsByPlayerId,
     });
 
+    const recommendedIds = picks
+        .map((p) => p.playerId)
+        .filter((id) => !!id);
+
+    const recommendedSet = new Set(recommendedIds);
+    const currentSet = new Set(currentStartersIds);
+
+    const toStart = recommendedIds.filter((id) => !currentSet.has(id));
+    const toSit = currentStartersIds.filter((id) => !recommendedSet.has(id));
+
+    // Pair them up (best-effort), same length not guaranteed
+    const suggestedChanges = [];
+    const max = Math.max(toStart.length, toSit.length);
+
+    for (let i = 0; i < max; i++) {
+    const startId = toStart[i] ?? null;
+    const sitId = toSit[i] ?? null;
+
+    const startP = startId ? playerDict[startId] : null;
+    const sitP = sitId ? playerDict[sitId] : null;
+
+    suggestedChanges.push({
+        start: startId
+        ? { id: startId, name: startP?.full_name ?? "Unknown", position: startP?.position, team: startP?.team }
+        : null,
+        sit: sitId
+        ? { id: sitId, name: sitP?.full_name ?? "Unknown", position: sitP?.position, team: sitP?.team }
+        : null,
+    });
+    }
+
+
     res.json({
       leagueId,
       rosterId,
@@ -137,6 +174,15 @@ router.get("/league/:leagueId/start-sit", async (req, res) => {
         baselineSource === "unknown"
           ? "Could not find per-player points in Sleeper matchup response; baseline points defaulted to 0. Tool still returns a valid lineup."
           : undefined,
+    currentStarters: currentStartersIds.map((pid) => ({
+        playerId: pid,
+        name: playerDict[pid]?.full_name ?? "Unknown",
+        position: playerDict[pid]?.position,
+        team: playerDict[pid]?.team,
+        injuryStatus: playerDict[pid]?.injury_status,
+        baselinePoints: Number(baselinePointsByPlayerId[pid] ?? 0),
+    })),
+    suggestedChanges,
     });
   } catch (e: any) {
     res.status(500).json({ error: e?.message ?? "Unknown error" });
