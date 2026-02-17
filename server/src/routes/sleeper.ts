@@ -70,14 +70,6 @@ router.get("/league/:leagueId/start-sit", async (req, res) => {
             | "avg_3"
             | "avg_5";
 
-        const window = mode === "avg_5" ? 5 : mode === "avg_3" ? 3 : 1;
-        const baselineWeeks: number[] = [];
-
-        for (let w = week - 1; w >= 1 && baselineWeeks.length < window; w--) {
-            baselineWeeks.push(w);
-        }
-
-
         // Load league + rosters
         const [league, rosters] = await Promise.all([
             sleeperGet<any>(`/league/${encodeURIComponent(leagueId)}`),
@@ -93,8 +85,14 @@ router.get("/league/:leagueId/start-sit", async (req, res) => {
         const state = await sleeperGet<any>(`/state/${sport}`);
         const defaultWeek = Number(state?.display_week ?? state?.week ?? 1);
         const week = req.query.week ? Number(req.query.week) : defaultWeek;
+        const window = mode === "avg_5" ? 5 : mode === "avg_3" ? 3 : 1;
+        const baselineWeeks: number[] = [];
 
-        const baselineWeek = Math.max(1, week - 1);
+        for (let w = week - 1; w >= 1 && baselineWeeks.length < window; w--) {
+            baselineWeeks.push(w);
+        }
+
+        const baselineWeek = baselineWeeks[0] ?? null;
 
         const roster = rosters.find((r) => Number(r.roster_id) === rosterId);
         if (!roster) return res.status(404).json({ error: `Roster ${rosterId} not found` });
@@ -110,28 +108,51 @@ router.get("/league/:leagueId/start-sit", async (req, res) => {
         // Players dictionary (cached on disk)
         const playerDict = await getSleeperPlayers("nfl");
 
-        // Baseline points from last week’s matchup (if available)
-        const matchups = await sleeperGet<any[]>(
-            `/league/${encodeURIComponent(leagueId)}/matchups/${encodeURIComponent(String(baselineWeek))}`
-        );
-
-        const myMatchup = matchups.find((m) => Number(m.roster_id) === rosterId);
-
         const baselinePointsByPlayerId: Record<string, number> = {};
         let baselineSource: "players_points" | "unknown" = "unknown";
 
-        if (myMatchup?.players_points && typeof myMatchup.players_points === "object") {
-            // Best-case (often present): a map of { [playerId]: points }
-            baselineSource = "players_points";
-            for (const [pid, pts] of Object.entries(myMatchup.players_points)) {
-                baselinePointsByPlayerId[String(pid)] = Number(pts ?? 0);
+        const totalsByPlayerId: Record<string, number> = {};
+        const countsByPlayerId: Record<string, number> = {};
+
+        if (baselineWeeks.length > 0) {
+            const matchupWindows = await Promise.all(
+                baselineWeeks.map((w) =>
+                    sleeperGet<any[]>(
+                        `/league/${encodeURIComponent(leagueId)}/matchups/${encodeURIComponent(String(w))}`
+                    )
+                )
+            );
+
+            for (const weekMatchups of matchupWindows) {
+                const myMatchup = weekMatchups.find((m) => Number(m.roster_id) === rosterId);
+                if (!myMatchup) continue;
+
+                if (myMatchup.players_points && typeof myMatchup.players_points === "object") {
+                    baselineSource = "players_points";
+                    for (const [pid, pts] of Object.entries(myMatchup.players_points)) {
+                        const playerId = String(pid);
+                        totalsByPlayerId[playerId] = Number(totalsByPlayerId[playerId] ?? 0) + Number(pts ?? 0);
+                        countsByPlayerId[playerId] = Number(countsByPlayerId[playerId] ?? 0) + 1;
+                    }
+                    continue;
+                }
+
+                if (Array.isArray(myMatchup.starters) && Array.isArray(myMatchup.starters_points)) {
+                    baselineSource = "players_points";
+                    for (let i = 0; i < myMatchup.starters.length; i++) {
+                        const playerId = String(myMatchup.starters[i]);
+                        const pts = Number(myMatchup.starters_points[i] ?? 0);
+                        totalsByPlayerId[playerId] = Number(totalsByPlayerId[playerId] ?? 0) + pts;
+                        countsByPlayerId[playerId] = Number(countsByPlayerId[playerId] ?? 0) + 1;
+                    }
+                }
             }
-        } else if (Array.isArray(myMatchup?.starters) && Array.isArray(myMatchup?.starters_points)) {
-            // Sometimes: starters_points aligned with starters array
-            baselineSource = "players_points"; // close enough
-            for (let i = 0; i < myMatchup.starters.length; i++) {
-                const pid = String(myMatchup.starters[i]);
-                baselinePointsByPlayerId[pid] = Number(myMatchup.starters_points[i] ?? 0);
+        }
+
+        for (const [playerId, total] of Object.entries(totalsByPlayerId)) {
+            const samples = countsByPlayerId[playerId] ?? 0;
+            if (samples > 0) {
+                baselinePointsByPlayerId[playerId] = total / samples;
             }
         }
 
@@ -179,6 +200,7 @@ router.get("/league/:leagueId/start-sit", async (req, res) => {
             rosterId,
             week,
             baselineWeek,
+            baselineWeeks,
             baselineSource,
             picks,
             bench,
