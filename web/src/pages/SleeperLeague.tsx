@@ -3,7 +3,70 @@ import { useParams } from "react-router-dom";
 import { apiGet } from "../lib/api";
 import { useMemo, useState } from "react";
 
-function StartSitPanel({ league }: { league: any }) {
+type NormalizedPlayer = {
+    id: string;
+    name: string;
+    position?: string;
+    team?: string;
+    injuryStatus?: string;
+};
+
+type NormalizedTeam = {
+    id: string;
+    rosterId: number;
+    name: string;
+    record?: { wins: number; losses: number; ties?: number };
+    starters: NormalizedPlayer[];
+    bench: NormalizedPlayer[];
+};
+
+type NormalizedLeague = {
+    leagueId: string;
+    name: string;
+    sport: "nfl" | "nba";
+    season: string;
+    teams: NormalizedTeam[];
+};
+
+type StartSitPlayerRef = {
+    id: string;
+    name: string;
+    position?: string;
+    team?: string;
+};
+
+type StartSitPick = {
+    slot: string;
+    playerId: string;
+    name: string;
+    position?: string;
+    team?: string;
+    injuryStatus?: string;
+    baselinePoints: number;
+    adjustedScore: number;
+};
+
+type StartSitBench = {
+    playerId: string;
+    name: string;
+    position?: string;
+    team?: string;
+    injuryStatus?: string;
+    baselinePoints: number;
+};
+
+type StartSitResponse = {
+    week: number;
+    baselineWeek: number | null;
+    baselineWeeks: number[];
+    baselineSource: string;
+    notes?: string;
+    picks: StartSitPick[];
+    bench: StartSitBench[];
+    suggestedChanges?: Array<{ start: StartSitPlayerRef | null; sit: StartSitPlayerRef | null }>;
+};
+
+function StartSitPanel({ league }: { league: NormalizedLeague }) {
     const [rosterId, setRosterId] = useState<number>(() => Number(league.teams?.[0]?.rosterId ?? 1));
     const [week, setWeek] = useState<string>(""); // blank = backend default
 
@@ -15,7 +78,7 @@ function StartSitPanel({ league }: { league: any }) {
             const params = new URLSearchParams();
             params.set("rosterId", String(rosterId));
             if (week.trim()) params.set("week", week.trim());
-            return apiGet<any>(`/api/sleeper/league/${encodeURIComponent(league.leagueId)}/start-sit?${params.toString()}`);
+            return apiGet<StartSitResponse>(`/api/sleeper/league/${encodeURIComponent(league.leagueId)}/start-sit?${params.toString()}`);
         },
         enabled: false, // run on button click
         retry: false,
@@ -32,7 +95,7 @@ function StartSitPanel({ league }: { league: any }) {
                         onChange={(e) => setRosterId(Number(e.target.value))}
                         style={{ width: "100%", padding: 8, marginTop: 4 }}
                     >
-                        {teamOptions.map((t: any) => (
+                        {teamOptions.map((t) => (
                             <option key={t.rosterId} value={t.rosterId}>
                                 {t.name} (roster {t.rosterId})
                             </option>
@@ -78,7 +141,7 @@ function StartSitPanel({ league }: { league: any }) {
 
                     <h3>Suggested starters</h3>
                     <ul style={{ display: "grid", gap: 6, paddingLeft: 18 }}>
-                        {toolQuery.data?.picks.map((p: any, idx: number) => (
+                        {toolQuery.data?.picks.map((p, idx: number) => (
                             <li key={`${p.slot}-${idx}`}>
                                 <b>{p.slot}</b>: {p.name}
                                 {p.playerId ? (
@@ -94,7 +157,7 @@ function StartSitPanel({ league }: { league: any }) {
 
                     <h3>Bench (sorted by baseline)</h3>
                     <ul style={{ display: "grid", gap: 6, paddingLeft: 18 }}>
-                        {toolQuery.data?.bench.map((b: any) => (
+                        {toolQuery.data?.bench.map((b) => (
                             <li key={b.playerId}>
                                 {b.name} — {b.position ?? "?"} ({b.team ?? "FA"}) • {Number(b.baselinePoints).toFixed(2)} pts
                                 {b.injuryStatus ? ` • ${b.injuryStatus}` : ""}
@@ -107,7 +170,7 @@ function StartSitPanel({ league }: { league: any }) {
                 <>
                     <h3>Suggested changes</h3>
                     <ul style={{ display: "grid", gap: 6, paddingLeft: 18 }}>
-                        {toolQuery.data?.suggestedChanges.map((c: any, idx: number) => (
+                        {toolQuery.data?.suggestedChanges.map((c, idx: number) => (
                             <li key={idx}>
                                 <b>Start:</b>{" "}
                                 {c.start ? `${c.start.name} — ${c.start.position ?? "?"} (${c.start.team ?? "FA"})` : "(none)"}
@@ -134,12 +197,13 @@ export default function SleeperLeague() {
 
     const leagueQuery = useQuery({
         queryKey: ["sleeperLeague", leagueId],
-        queryFn: () => apiGet<any>(`/api/sleeper/league/${encodeURIComponent(leagueId!)}/normalized`),
+        queryFn: () => apiGet<NormalizedLeague>(`/api/sleeper/league/${encodeURIComponent(leagueId!)}/normalized`),
         enabled: !!leagueId,
     });
 
     if (leagueQuery.isLoading) return <div>Loading league…</div>;
     if (leagueQuery.isError) return <div style={{ color: "crimson" }}>Failed to load league.</div>;
+    if (!leagueQuery.data) return <div style={{ color: "crimson" }}>League data is unavailable.</div>;
 
     const league = leagueQuery.data;
 
@@ -154,7 +218,7 @@ export default function SleeperLeague() {
 
             <h2>Teams</h2>
             <ul style={{ display: "grid", gap: 12, paddingLeft: 18 }}>
-                {league.teams.map((t: any) => (
+                {league.teams.map((t) => (
                     <li key={t.id} style={{ border: "1px solid #ddd", borderRadius: 8, padding: 12 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                             <div style={{ fontWeight: 700 }}>{t.name}</div>
@@ -172,7 +236,7 @@ export default function SleeperLeague() {
                         <details style={{ marginTop: 8 }}>
                             <summary>Show starters</summary>
                             <ul>
-                                {t.starters.map((p: any) => (
+                                {t.starters.map((p) => (
                                     <li key={p.id}>
                                         {p.name} — {p.position ?? "?"} ({p.team ?? "FA"})
                                         {p.injuryStatus ? ` • ${p.injuryStatus}` : ""}

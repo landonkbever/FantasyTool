@@ -41,13 +41,16 @@ function playerName(p?: SleeperPlayer) {
 
 function toNormPlayer(playerId: string, dict: Record<string, SleeperPlayer>): NormalizedPlayer {
   const p = dict[playerId];
-  return {
+  const player: NormalizedPlayer = {
     id: playerId,
     name: playerName(p),
-    position: p?.position,
-    team: p?.team,
-    injuryStatus: p?.injury_status,
   };
+
+  if (p?.position) player.position = p.position;
+  if (p?.team) player.team = p.team;
+  if (p?.injury_status) player.injuryStatus = p.injury_status;
+
+  return player;
 }
 
 export function normalizeSleeperLeague(args: {
@@ -79,23 +82,28 @@ export function normalizeSleeperLeague(args: {
       owner?.username ||
       `Roster ${r.roster_id}`;
 
-    return {
+    const team: NormalizedTeam = {
       id: String(r.roster_id),
       rosterId: r.roster_id,
-      ownerId: r.owner_id,
       name: displayName,
-      record: r.settings
-        ? {
-            wins: Number(r.settings.wins ?? 0),
-            losses: Number(r.settings.losses ?? 0),
-            ties: Number(r.settings.ties ?? 0),
-          }
-        : undefined,
-      pointsFor: r.settings?.fpts != null ? Number(r.settings.fpts) : undefined,
-      pointsAgainst: r.settings?.fpts_against != null ? Number(r.settings.fpts_against) : undefined,
       starters,
       bench,
     };
+
+    if (r.owner_id) team.ownerId = r.owner_id;
+
+    if (r.settings) {
+      team.record = {
+        wins: Number(r.settings.wins ?? 0),
+        losses: Number(r.settings.losses ?? 0),
+        ties: Number(r.settings.ties ?? 0),
+      };
+    }
+
+    if (r.settings?.fpts != null) team.pointsFor = Number(r.settings.fpts);
+    if (r.settings?.fpts_against != null) team.pointsAgainst = Number(r.settings.fpts_against);
+
+    return team;
   });
 
   return {

@@ -101,15 +101,19 @@ export function buildStartSit(args: {
 
         if (pick) {
             used.add(pick.playerId);
-            picks.push({
+            const startPick: StartSitPick = {
                 slot,
                 playerId: pick.playerId,
                 name: pick.name,
-                position: pick.position,
-                team: pick.team,
-                injuryStatus: pick.injuryStatus,
                 baselinePoints: pick.baselinePoints,
-            });
+                adjustedScore: pick.adjustedScore,
+            };
+
+            if (pick.position) startPick.position = pick.position;
+            if (pick.team) startPick.team = pick.team;
+            if (pick.injuryStatus) startPick.injuryStatus = pick.injuryStatus;
+
+            picks.push(startPick);
         } else {
             // no eligible player found -> empty slot
             picks.push({
@@ -117,6 +121,7 @@ export function buildStartSit(args: {
                 playerId: "",
                 name: "(no eligible player found)",
                 baselinePoints: 0,
+                adjustedScore: 0,
             });
         }
     }
